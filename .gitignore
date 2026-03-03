@@ -29,3 +29,6 @@ data.json
 
 # Claude Code
 .claude/settings.local.json
+
+# Planning
+.planning/

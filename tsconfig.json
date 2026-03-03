@@ -1,5 +1,4 @@
 {
-  "include": ["src/**/*", "version-bump.ts", "build.ts"],
   "compilerOptions": {
     "target": "ESNext",
     "lib": ["DOM", "ESNext"],
@@ -7,9 +6,8 @@
     "moduleResolution": "bundler",
     "noEmit": true,
     "strict": true,
-    "isolatedModules": true,
-    "baseUrl": ".",
-    "paths": { "src/*": ["src/*"] },
-    "types": ["node"]
-  }
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts", "build.ts", "version-bump.ts"],
+  "exclude": ["src/**/*.test.ts"]
 }

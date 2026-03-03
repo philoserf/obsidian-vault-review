@@ -10,8 +10,9 @@
       "src/**/*.ts",
       "src/**/*.js",
       "*.json",
-      "build.ts",
-      "version-bump.ts"
+      "scripts/**/*.ts",
+      "version-bump.ts",
+      "build.ts"
     ],
     "ignoreUnknown": true
   },
