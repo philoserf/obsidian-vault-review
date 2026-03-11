@@ -15,4 +15,5 @@ jobs:
         with:
           bun-version: latest
       - run: bun install
+      - run: bun audit --audit-level=critical
       - run: bun run check
