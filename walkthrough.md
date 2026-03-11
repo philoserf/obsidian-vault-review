@@ -1023,11 +1023,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
       - run: bun install
+      - run: bun audit --audit-level=critical
       - run: bun run check
+      - run: bun test
 ```
 
 ```bash
@@ -1041,6 +1045,9 @@ on:
   push:
     tags:
       - "*"
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -1061,6 +1068,7 @@ jobs:
         with:
           files: |
             main.js
+            styles.css
             manifest.json
           fail_on_unmatched_files: true
         env:
@@ -1215,4 +1223,3 @@ All open issues are tracked on GitHub. Here's the consolidated view:
 - File deletion marks as `deleted` rather than removing (preserves history)
 - Settings merge handles forward compatibility for new settings fields
 - Biome enforces consistent formatting
-
