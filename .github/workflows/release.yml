@@ -27,6 +27,7 @@ jobs:
         with:
           files: |
             main.js
+            styles.css
             manifest.json
           fail_on_unmatched_files: true
         env:
