@@ -2,7 +2,9 @@
   "name": "vault-review",
   "version": "1.0.2",
   "description": "Randomly review your vault and track progress",
-  "type": "module",
+  "main": "main.js",
+  "author": "Mark Ayers",
+  "license": "MIT",
   "scripts": {
     "audit": "bun audit --audit-level=critical",
     "dev": "bun run build.ts --watch",
@@ -18,8 +20,6 @@
     "test": "bun test",
     "deploy": "cp main.js manifest.json ~/source/philoserf/notes/.obsidian/plugins/vault-review/"
   },
-  "author": "Mark Ayers",
-  "license": "MIT",
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",
     "@types/bun": "^1.3.10",
