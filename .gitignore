@@ -1,5 +1,4 @@
 # Build output
-dist/
 *.js.map
 
 # Dependencies
@@ -23,9 +22,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
-
-# Obsidian
-data.json
 
 # Claude Code
 .claude/settings.local.json
