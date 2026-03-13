@@ -21,9 +21,9 @@
     "deploy": "cp main.js manifest.json ~/source/philoserf/notes/.obsidian/plugins/vault-review/"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.6",
+    "@biomejs/biome": "^2.4.7",
     "@types/bun": "^1.3.10",
-    "@types/node": "^25.4.0",
+    "@types/node": "^25.5.0",
     "obsidian": "^1.12.3",
     "typescript": "^5.9.3"
   }
