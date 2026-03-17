@@ -1,10 +1,10 @@
 {
   "id": "vault-review",
   "name": "Vault Review",
-  "description": "Randomly review your vault and track progress",
   "version": "1.0.0",
+  "minAppVersion": "1.0.0",
+  "description": "Randomly review your vault and track progress",
   "author": "Mark Ayers (originally by Alexander)",
   "authorUrl": "https://github.com/philoserf",
-  "minAppVersion": "1.0.0",
   "isDesktopOnly": false
 }
