@@ -279,14 +279,22 @@ export default class VaultReviewPlugin extends Plugin {
   } = {}) => {
     const { promise, resolve } = Promise.withResolvers<DeleteSnapshotResult>();
 
+    let settled = false;
+
     const onDelete = async () => {
+      if (settled) return;
+      settled = true;
       this.settings.snapshot = undefined;
       this.statusBar.update();
       await this.saveSettings();
       resolve("deleted");
     };
 
-    const onCancel = () => resolve("cancelled");
+    const onCancel = () => {
+      if (settled) return;
+      settled = true;
+      resolve("cancelled");
+    };
 
     if (askForConfirmation) {
       const modal = new ConfirmSnapshotDeleteModal(
