@@ -1,66 +1,83 @@
-# Obsidian Vault Review — Code Walkthrough
+# Vault Review Walkthrough
 
-*2026-03-09T04:29:53Z by Showboat 0.6.1*
-<!-- showboat-id: 348a91ea-296f-4782-909a-4ff0c2ee2fe3 -->
+*2026-03-19T18:34:13Z by Showboat 0.6.1*
+<!-- showboat-id: b783bd0e-3bd9-4d2a-98d0-3d37c716ca5c -->
 
-## What This Plugin Does
+## Overview
 
-Vault Review is an Obsidian plugin that helps you systematically review every note in your vault. It:
+Vault Review is an Obsidian plugin that helps users systematically review every note in their vault. It takes a **snapshot** of all markdown files, then lets the user work through them one at a time — marking each as reviewed, opening random unreviewed files, and tracking progress via a status bar and settings panel.
 
-1. Takes a **snapshot** of all markdown files at a point in time
-2. Lets you **randomly open** unreviewed files one by one
-3. **Tracks progress** — each file is `to_review`, `reviewed`, `deleted`, or `new`
-4. Responds to vault events (renames, deletes) to keep the snapshot consistent
-5. Shows review status in the **status bar** and a **settings tab** with statistics
+**Key technologies:** TypeScript, Obsidian Plugin API, Bun (build + test), Biome (lint/format).
 
-The entire plugin lives in a single source file (`src/main.ts`, ~640 lines) plus a test file, a build script, and a version-bump utility.
+**Entry point:** `src/main.ts` — the entire plugin lives in a single 651-line file.
 
----
+**Build output:** `main.js` (CJS, minified), `manifest.json`, `styles.css`.
 
-## Project Structure
+## Architecture
+
+### Directory layout
 
 ```bash
-find . -type f \( -name "*.ts" -o -name "*.json" -o -name "*.css" -o -name "*.yml" -o -name "*.yaml" \) \! -path "*/node_modules/*" \! -path "*/bun.lock*" | sort
+cat <<'HEREDOC'
+.
+├── src/
+│   ├── main.ts            # Plugin source (all classes)
+│   └── main.test.ts       # Unit tests (pure logic only)
+├── scripts/
+│   └── validate-plugin.ts # Pre-release validation
+├── build.ts               # Bun bundler config
+├── version-bump.ts        # Syncs version across manifests
+├── manifest.json          # Obsidian plugin manifest
+├── versions.json          # Obsidian version compatibility map
+├── styles.css             # Plugin styles
+├── biome.json             # Linter/formatter config
+└── tsconfig.json          # TypeScript config
+HEREDOC
 ```
 
 ```output
-./.github/dependabot.yml
-./.github/workflows/main.yml
-./.github/workflows/release.yml
-./biome.json
-./build.ts
-./manifest.json
-./package.json
-./scripts/validate-plugin.ts
-./src/main.test.ts
-./src/main.ts
-./styles.css
-./tsconfig.json
-./version-bump.ts
-./versions.json
+.
+├── src/
+│   ├── main.ts            # Plugin source (all classes)
+│   └── main.test.ts       # Unit tests (pure logic only)
+├── scripts/
+│   └── validate-plugin.ts # Pre-release validation
+├── build.ts               # Bun bundler config
+├── version-bump.ts        # Syncs version across manifests
+├── manifest.json          # Obsidian plugin manifest
+├── versions.json          # Obsidian version compatibility map
+├── styles.css             # Plugin styles
+├── biome.json             # Linter/formatter config
+└── tsconfig.json          # TypeScript config
 ```
 
-Key files:
+### Module boundaries
 
-| File | Purpose |
-|------|---------|
-| `src/main.ts` | All plugin logic — types, plugin class, UI classes |
-| `src/main.test.ts` | Unit tests (Bun test runner) |
-| `build.ts` | Bun bundler config |
-| `version-bump.ts` | Syncs version across package.json, manifest.json, versions.json |
-| `scripts/validate-plugin.ts` | Pre-release validation |
-| `manifest.json` | Obsidian plugin metadata |
-| `styles.css` | Plugin styles |
-| `biome.json` | Linter/formatter config |
+Everything lives in `src/main.ts`. The file contains six classes/constructs:
 
----
+1. **`VaultReviewPlugin`** — Main plugin class (extends `Plugin`). Manages lifecycle, commands, settings, and snapshot state.
+2. **`StatusBar`** — Renders review status in Obsidian's status bar with a click menu.
+3. **`VaultReviewSettingTab`** — Settings UI (extends `PluginSettingTab`). Snapshot management and status bar toggle.
+4. **`ConfirmSnapshotDeleteModal`** — Confirmation dialog for destructive snapshot deletion.
+5. **`FileStatusControllerModal`** — Suggest modal (command palette style) for quick review actions.
+6. **`ACTIONS`** — Const object mapping action keys to display names.
 
-## Data Model
+### Data flow
 
-Everything starts with the type system. The plugin uses TypeScript branded types to distinguish a `File` object (in the snapshot) from a plain object with `path` and `status` fields.
+1. User creates a snapshot → all `.md` files are captured with `to_review` status
+2. Plugin persists snapshot to Obsidian's `data.json` via `saveData()`
+3. User opens random files, marks them reviewed → status updates in-place
+4. File renames/deletes are tracked via vault events
+5. Status bar and settings panel read snapshot state to render progress
+
+## Core Walkthrough
+
+### Types and branding
+
+The plugin uses a branded type pattern to distinguish plugin `File` objects from Obsidian's `TFile`. A `Brand<K, T>` intersection type adds a phantom `__brand` field that exists only at the type level.
 
 ```bash
-sed -n '16,55p' src/main.ts
+sed -n '16,49p' src/main.ts
 ```
 
 ```output
@@ -98,43 +115,24 @@ const toFile = (file: File | TFile, status: SnapshotFileStatus): File => {
 type Settings = {
   showStatusBar: boolean;
 };
-
-const DEFAULT_SETTINGS: VaultReviewSettings = {
-  settings: {
-    showStatusBar: true,
-  },
-};
 ```
 
-Walking through the types:
+Key points:
 
-- **`Brand<K, T>`** — A branded type pattern. Adds a phantom `__brand` field so TypeScript treats `File` as distinct from `{ path: string; status: string }`. The brand exists only at the type level — no runtime cost.
-- **`VaultReviewSettings`** — The top-level persisted state. Has an optional `snapshot` (null when no snapshot exists) and a `settings` object.
-- **`Snapshot`** — An array of `File` entries plus the creation date.
-- **`File`** — A branded type with `path` (vault-relative) and `status`.
-- **`FileStatus`** — Four states: `new` (not in snapshot), `to_review`, `reviewed`, `deleted`. Note that `new` only exists at runtime for display — it's never stored in the snapshot.
-- **`SnapshotFileStatus`** — `FileStatus` minus `new`. This is what gets persisted.
-- **`toFile`** — Factory function. Accepts either a branded `File` or an Obsidian `TFile` and casts the result to the branded type.
-- **`DEFAULT_SETTINGS`** — No snapshot, status bar enabled.
+- `VaultReviewSettings` is the top-level persisted shape — an optional `Snapshot` plus a `Settings` object.
+- `FileStatus` has four states: `new` (not in snapshot), `to_review`, `reviewed`, `deleted`.
+- `SnapshotFileStatus` excludes `new` since snapshot files always have an explicit status.
+- `toFile()` is a factory that casts a plain object to the branded `File` type.
 
-> **Concern:** `toFile` uses `as File` to cast, which bypasses the brand. The brand pattern provides type safety at call sites but the factory itself is unchecked. This is a common trade-off with branded types in TypeScript.
+### Plugin lifecycle — `onload`
 
----
-
-## Plugin Lifecycle
-
-The plugin class extends Obsidian's `Plugin` base class. `onload` is the entry point — called when Obsidian activates the plugin.
+The plugin registers everything in `onload`: ribbon icon, status bar, four commands, settings tab, and vault event handlers.
 
 ```bash
-sed -n '57,123p' src/main.ts
+sed -n '62,124p' src/main.ts
 ```
 
 ```output
-export default class VaultReviewPlugin extends Plugin {
-  settings!: VaultReviewSettings;
-
-  statusBar!: StatusBar;
-
   onload = async () => {
     await this.loadSettings();
 
@@ -197,27 +195,16 @@ export default class VaultReviewPlugin extends Plugin {
     this.registerEvent(
       this.app.workspace.on("file-open", this.statusBar.update),
     );
+  };
 ```
 
-`onload` does five things in order:
+The four commands use Obsidian's `checkCallback` pattern: when `checking` is `true`, return whether the command should be available. This hides "Review file" when the active file isn't `to_review`, and "Unreview file" when it isn't `reviewed`.
 
-1. **Loads settings** from `data.json` via Obsidian's `loadData()` API
-2. **Adds a ribbon icon** ("scan-eye") that opens the `FileStatusControllerModal`
-3. **Creates the status bar** widget
-4. **Registers four commands** — the core review workflow:
-   - `open-random-file` — always available
-   - `complete-review` — only available when active file is `to_review` (uses `checkCallback`)
-   - `complete-review-and-open-next` — same check, but chains to the next random file
-   - `unreview-file` — only available when active file is `reviewed`
-5. **Registers three event handlers** — `rename`, `delete` on the vault, and `file-open` on the workspace (to update the status bar)
+Three vault events are registered: `rename` updates snapshot paths, `delete` marks files as deleted, and `file-open` refreshes the status bar.
 
-> **Note:** All methods are arrow functions (`onload = async () => {}`), which binds `this` lexically. This avoids the classic JavaScript `this`-binding pitfall when passing methods as callbacks. It also means these methods live on the instance, not the prototype — a minor memory trade-off that's fine for a singleton plugin.
+### Settings persistence
 
-> **Concern:** There is no `onunload` method. Obsidian's `registerEvent` handles cleanup for the three event subscriptions, and `addCommand`/`addRibbonIcon`/`addStatusBarItem` are also managed by the base `Plugin` class. However, `StatusBar` adds a raw `addEventListener("click", ...)` that isn't cleaned up through Obsidian's API. In practice this is fine because the status bar element is destroyed on unload, but it's not idiomatic.
-
----
-
-## Settings Persistence
+Settings are loaded with a shallow merge pattern, then the `createdAt` date is rehydrated from its JSON string form.
 
 ```bash
 sed -n '126,148p' src/main.ts
@@ -249,87 +236,17 @@ sed -n '126,148p' src/main.ts
   };
 ```
 
-`loadSettings` does a shallow merge of defaults with persisted data, then a nested merge for the `settings` sub-object. This ensures new settings fields get their defaults even if the user has old persisted data.
+The two-level spread (`...data` then `...data?.settings`) ensures new settings fields get defaults without clobbering existing nested values. `onExternalSettingsChange` handles Obsidian syncing settings from another device.
 
-The `createdAt` date requires special handling: `JSON.stringify` serializes `Date` as an ISO string, so on load it must be parsed back. The `typeof === "string"` check handles this roundtrip.
+### Core operations — review, unreview, random file
 
-`onExternalSettingsChange` is an Obsidian lifecycle hook called when settings are modified outside the plugin (e.g. sync). It reloads and refreshes the UI.
-
-> **Concern:** There's no `schemaVersion` field. If the data model changes in a future release, migration logic would have to rely on heuristics to detect the old format. Adding `schemaVersion: 1` now would make future migrations safe (see issue #15).
-
----
-
-## Core Query Methods
-
-These methods read state but don't modify it. They're used throughout the plugin.
+The main workflow methods modify snapshot file statuses and persist.
 
 ```bash
-sed -n '150,182p' src/main.ts
+sed -n '193,254p' src/main.ts
 ```
 
 ```output
-  getActiveFile = (): TFile | null => {
-    const activeFile = this.app.workspace.getActiveFile();
-    if (activeFile?.extension !== "md") {
-      return null;
-    }
-    return activeFile;
-  };
-
-  getSnapshotFile = (path?: string) => {
-    path = path ?? this.getActiveFile()?.path;
-    if (!path) {
-      return;
-    }
-
-    return this.settings.snapshot?.files.find((f) => f.path === path);
-  };
-
-  getActiveFileStatus = (): FileStatus | undefined => {
-    const activeFile = this.getActiveFile();
-    if (!activeFile) {
-      return;
-    }
-
-    return this.getSnapshotFile(activeFile.path)?.status ?? "new";
-  };
-
-  getToReviewFiles = () => {
-    return (
-      this.settings.snapshot?.files.filter(
-        (file) => file.status === "to_review",
-      ) ?? []
-    );
-  };
-```
-
-- **`getActiveFile`** — Returns the currently open file, but only if it's markdown. Non-markdown files (images, PDFs, canvas) are ignored.
-- **`getSnapshotFile`** — Finds a file in the snapshot by path. Accepts an explicit path or falls back to the active file. Returns `undefined` if not found (i.e. file is "new").
-- **`getActiveFileStatus`** — Combines the above: returns the status of the active file, defaulting to `"new"` if it's not in the snapshot. Returns `undefined` if no markdown file is open.
-- **`getToReviewFiles`** — Returns all files with `to_review` status. Returns `[]` if no snapshot exists.
-
-> **Performance note:** `getSnapshotFile` does a linear scan (`Array.find`). For a vault with thousands of files, this runs on every file-open event (via the status bar update). A `Map<string, File>` index would be O(1) but adds complexity. Linear scan is likely fast enough for typical vault sizes.
-
----
-
-## Review Workflow
-
-These are the action methods that modify state.
-
-```bash
-sed -n '184,225p' src/main.ts
-```
-
-```output
-  openFileStatusController = () => {
-    if (!this.settings.snapshot) {
-      new Notice("Vault review snapshot is not created");
-      return;
-    }
-
-    new FileStatusControllerModal(this.app, this).open();
-  };
-
   openRandomFile = () => {
     if (!this.settings.snapshot) {
       new Notice("Vault review snapshot is not created");
@@ -363,26 +280,7 @@ sed -n '184,225p' src/main.ts
       }
     }
   };
-```
 
-**`openRandomFile`** picks a random file from the `to_review` list and opens it via `focusFile`. Uses `Math.random()` — not cryptographically secure, but fine for shuffling notes.
-
-**`focusFile`** is where a significant concern lives (issue #6):
-
-- If `getFileByPath` finds the file, it opens it in a leaf (tab).
-- If the file **can't be found**, it shows a notice — then **silently removes the file from the snapshot** and saves. The user loses their review tracking for that file with no confirmation. This is data loss. The file might have been moved (not renamed through Obsidian), or the vault might not be fully indexed yet.
-
-A safer approach: mark the file as `deleted` instead of removing it, or prompt the user.
-
----
-
-## Marking Files Reviewed / Unreviewed
-
-```bash
-sed -n '227,273p' src/main.ts
-```
-
-```output
   completeReview = async ({
     file,
     openNext = false,
@@ -411,47 +309,18 @@ sed -n '227,273p' src/main.ts
     this.statusBar.update();
     await this.saveSettings();
   };
-
-  unreviewFile = async (file?: File) => {
-    const activeFile = file ?? this.getActiveFile();
-    if (!activeFile) {
-      return;
-    }
-
-    const snapshotFile = this.getSnapshotFile(activeFile.path);
-
-    if (!snapshotFile) {
-      new Notice("File was added to snapshot and marked as not reviewed");
-      this.settings.snapshot?.files.push(toFile(activeFile, "to_review"));
-    } else {
-      snapshotFile.status = "to_review";
-    }
-
-    this.statusBar.update();
-    await this.saveSettings();
-  };
 ```
 
-Both methods follow the same pattern:
+`openRandomFile` picks a random `to_review` file using `Math.random()`. `focusFile` opens it in the active leaf, or removes it from the snapshot if the file no longer exists on disk.
 
-1. Get the file (from argument or active file)
-2. Look it up in the snapshot
-3. If found → mutate `status` in place
-4. If not found → add it to the snapshot (auto-enroll)
-5. Update UI and persist
+`completeReview` handles two cases: if the file is already in the snapshot, it flips its status to `reviewed`; if it's new (not in snapshot), it adds it as `reviewed`. The optional `openNext` flag chains into `openRandomFile` for a smooth workflow.
 
-The auto-enroll behavior (lines 241-243, 264-266) is interesting: if you review a file that wasn't in the original snapshot, it gets added automatically. This handles files created after the snapshot.
+### Snapshot deletion with Promise.withResolvers
 
-**`completeReview`** also accepts `{ openNext: true }` to chain into `openRandomFile` — this powers the "review and next" workflow.
-
-> **Concern:** Both methods mutate `snapshotFile.status` directly. While functional, this bypasses the `toFile` factory and the brand type guarantee. The object is already branded from initial creation, so the brand persists, but it's a pattern that could cause confusion if the `File` type gains additional required fields.
-
----
-
-## Snapshot Deletion
+Snapshot deletion uses a confirmation modal with a promise-based flow.
 
 ```bash
-sed -n '275,304p' src/main.ts
+sed -n '275,312p' src/main.ts
 ```
 
 ```output
@@ -462,14 +331,22 @@ sed -n '275,304p' src/main.ts
   } = {}) => {
     const { promise, resolve } = Promise.withResolvers<DeleteSnapshotResult>();
 
+    let settled = false;
+
     const onDelete = async () => {
+      if (settled) return;
+      settled = true;
       this.settings.snapshot = undefined;
       this.statusBar.update();
       await this.saveSettings();
       resolve("deleted");
     };
 
-    const onCancel = () => resolve("cancelled");
+    const onCancel = () => {
+      if (settled) return;
+      settled = true;
+      resolve("cancelled");
+    };
 
     if (askForConfirmation) {
       const modal = new ConfirmSnapshotDeleteModal(
@@ -487,20 +364,14 @@ sed -n '275,304p' src/main.ts
   };
 ```
 
-`deleteSnapshot` uses `Promise.withResolvers` (ES2024) to create a promise that resolves when the user confirms or cancels.
+The `settled` guard prevents double-resolution — `modal.onClose` fires both when the user clicks Cancel *and* when the modal closes after Delete. Without it, `resolve()` would be called twice. `Promise.withResolvers` is a relatively new API (ES2024); see the concerns section for compatibility notes.
 
-Two concerns here:
+### Vault event handlers
 
-1. **Double-resolve (issue #5):** `onCancel` is assigned as both the cancel button callback AND `modal.onClose`. When the user clicks Delete, `onDelete` resolves with `"deleted"`, then `modal.close()` fires `onClose` → `onCancel` → resolves again with `"cancelled"`. The second resolve is ignored by the Promise spec, but it's sloppy. The fix is to guard against double-calls (e.g., a `resolved` flag).
-
-2. **`Promise.withResolvers` compatibility (issue #16):** This is ES2024. Obsidian's `manifest.json` declares `minAppVersion: "1.0.0"`. If older Obsidian versions ship an Electron that doesn't support this API, the plugin will crash on load.
-
----
-
-## Event Handlers
+File renames update the snapshot path in-place. File deletions mark the snapshot entry as `deleted` rather than removing it, preserving the count for statistics.
 
 ```bash
-sed -n '306,329p' src/main.ts
+sed -n '314,337p' src/main.ts
 ```
 
 ```output
@@ -530,20 +401,14 @@ sed -n '306,329p' src/main.ts
   };
 ```
 
-**`handleFileRename`** — When a file is renamed (or moved), updates the path in the snapshot. Simple and correct for individual files.
+Both handlers guard against `TFolder` events — only files matter. The rename handler looks up by `oldPath` (not the new path), which is correct since the snapshot still holds the old path at that point.
 
-> **Concern (issue #8):** When a **folder** is renamed, Obsidian fires a single `rename` event for the folder, not for each child file. The handler returns early for `TFolder`, so all child file paths in the snapshot become stale. Fix: when a folder is renamed, iterate the snapshot and update all paths that start with `oldPath + "/"`.
+### StatusBar
 
-**`handleFileDelete`** — Marks the file as `deleted` in the snapshot rather than removing it. This is the right approach — it preserves the record and keeps statistics accurate. Note the contrast with `focusFile`, which removes files entirely (the inconsistency flagged in issue #6).
-
-This concludes the `VaultReviewPlugin` class (line 330). The rest of the file defines UI classes.
-
----
-
-## StatusBar
+The `StatusBar` class manages a clickable status bar element that shows the review state of the active file.
 
 ```bash
-sed -n '332,399p' src/main.ts
+sed -n '340,407p' src/main.ts
 ```
 
 ```output
@@ -617,31 +482,110 @@ class StatusBar {
 }
 ```
 
-`StatusBar` manages a single status bar element with three behaviors:
+The status bar hides itself when there's no snapshot, no active file, or the file is deleted. Clicking it opens a context menu to toggle review status. The `mod-clickable` class gives it Obsidian's standard hover cursor.
 
-1. **`update`** — Called on every file-open event. Hides the bar if there's no snapshot, no active file, or the file is deleted. Otherwise shows the review status text.
-2. **`onClick`** — Shows a context menu with "Reviewed" / "Not reviewed" toggle items. Uses Obsidian's `Menu` API positioned at the mouse event.
-3. **Visibility** — Uses `toggleClass("hidden", ...)` to show/hide.
+### FileStatusControllerModal
 
-> **Concern (issue #7):** The `.hidden` CSS class (`styles.css:12`) is `display: none` with no namespace prefix. Any other plugin or Obsidian theme that defines `.hidden` could conflict. Should be `.vault-review-hidden`.
-
----
-
-## Settings Tab
+The suggest modal provides a command-palette-style interface for quick actions. It adapts its suggestions based on the active file's status.
 
 ```bash
-sed -n '401,526p' src/main.ts
+sed -n '571,650p' src/main.ts
 ```
 
 ```output
-class VaultReviewSettingTab extends PluginSettingTab {
+const ACTIONS = {
+  open_random: {
+    name: "Open random not reviewed file",
+  },
+  review: {
+    name: "Review file",
+  },
+  review_and_next: {
+    name: "Review file and open next random file",
+  },
+  unreview: {
+    name: "Unreview file",
+  },
+} as const;
+
+type Action = keyof typeof ACTIONS;
+
+class FileStatusControllerModal extends SuggestModal<Action> {
   plugin: VaultReviewPlugin;
 
   constructor(app: App, plugin: VaultReviewPlugin) {
-    super(app, plugin);
+    super(app);
     this.plugin = plugin;
+
+    const fileStatus = this.plugin.getActiveFileStatus();
+    this.setPlaceholder(
+      !fileStatus
+        ? ""
+        : fileStatus === "new"
+          ? "This file is not in snapshot"
+          : fileStatus === "to_review"
+            ? "This file is not reviewed"
+            : "This file is reviewed",
+    );
   }
 
+  getSuggestions = (query: string): Action[] => {
+    const activeFile = this.plugin.getActiveFile();
+    let actions: Action[] = [];
+
+    if (!activeFile) {
+      actions = ["open_random"];
+    } else {
+      const isReviewed =
+        this.plugin.getSnapshotFile(activeFile.path)?.status === "reviewed";
+
+      if (isReviewed) {
+        actions = ["open_random", "unreview"];
+      } else {
+        actions = ["review_and_next", "review", "open_random"];
+      }
+    }
+
+    return actions.filter((a) =>
+      ACTIONS[a].name.toLowerCase().includes(query.toLowerCase()),
+    );
+  };
+
+  renderSuggestion = (action: Action, el: HTMLElement) => {
+    el.createEl("div", { text: ACTIONS[action].name });
+  };
+
+  onChooseSuggestion = (action: Action, _evt: MouseEvent | KeyboardEvent) => {
+    if (action === "open_random") {
+      this.plugin.openRandomFile();
+    }
+
+    if (action === "review") {
+      this.plugin.completeReview();
+    }
+
+    if (action === "review_and_next") {
+      this.plugin.completeReview({ openNext: true });
+    }
+
+    if (action === "unreview") {
+      this.plugin.unreviewFile();
+    }
+  };
+}
+```
+
+The modal's `getSuggestions` tailors available actions: reviewed files get "unreview" and "open random"; unreviewed files get "review", "review and next", and "open random". The query filter enables fuzzy search by action name.
+
+### Settings tab — snapshot management and statistics
+
+The settings tab is the primary UI for creating/deleting snapshots and viewing progress.
+
+```bash
+sed -n '417,533p' src/main.ts
+```
+
+```output
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
@@ -759,174 +703,16 @@ class VaultReviewSettingTab extends PluginSettingTab {
         });
       });
   }
-}
 ```
 
-The settings tab has two states:
+The settings tab has two states: no snapshot (shows "Create snapshot" CTA) and active snapshot (shows trash, "Add new files", and statistics). The "Add all new files" button filters vault files against the existing snapshot to find additions since the snapshot was created.
 
-**No snapshot:** Shows a "Create snapshot" button that calls `vault.getMarkdownFiles()`, wraps each in a `File` with `to_review` status, and saves.
+The statistics section computes review progress: total, reviewed, to-review, deleted, and not-in-snapshot counts with percentages. The `notInSnapshotLength` calculation accounts for deleted files that are still in the snapshot array.
 
-**Snapshot exists:** Shows three controls:
-- A trash button to delete the snapshot (with confirmation modal)
-- An "Add all new files" button that finds markdown files not already in the snapshot and adds them as `to_review`
-- A status bar visibility toggle
-
-Below the controls, it displays **snapshot statistics**: total vault files, files in/not-in snapshot, reviewed/to_review/deleted counts with percentages.
-
-> **Concern (issue #14):** The statistics computation (lines 471-490) is duplicated in the test file as `computeStats()`. It should be extracted into a shared function that both the settings tab and tests use. This would eliminate the duplication and ensure tests verify the real logic.
-
-> **Note:** `getMarkdownFiles()` is called multiple times within `display()` (lines 434, 454, 471). Each call iterates the entire vault. For very large vaults this could be noticeable, though Obsidian likely caches the file list internally.
-
----
-
-## Modals
+### Build system
 
 ```bash
-sed -n '528,642p' src/main.ts
-```
-
-```output
-type DeleteSnapshotResult = "deleted" | "cancelled";
-
-class ConfirmSnapshotDeleteModal extends Modal {
-  constructor(
-    app: App,
-    onDelete: () => Promise<void> | void,
-    onCancel: () => Promise<void> | void,
-  ) {
-    super(app);
-
-    this.setTitle("Delete snapshot?");
-
-    new Setting(this.contentEl)
-      .setName("This action cannot be undone")
-      .setDesc(
-        "You will lose all progress and will need to create a new snapshot.",
-      )
-      .addButton((btn) => {
-        btn.setButtonText("Cancel");
-        btn.onClick(async () => {
-          await onCancel();
-          this.close();
-        });
-      })
-      .addButton((btn) => {
-        btn.setButtonText("Delete");
-        btn.setWarning();
-        btn.onClick(async () => {
-          await onDelete();
-          this.close();
-        });
-      });
-  }
-}
-
-const ACTIONS = {
-  open_random: {
-    name: "Open random not reviewed file",
-  },
-  review: {
-    name: "Review file",
-  },
-  review_and_next: {
-    name: "Review file and open next random file",
-  },
-  unreview: {
-    name: "Unreview file",
-  },
-} as const;
-
-type Action = keyof typeof ACTIONS;
-
-class FileStatusControllerModal extends SuggestModal<Action> {
-  plugin: VaultReviewPlugin;
-
-  constructor(app: App, plugin: VaultReviewPlugin) {
-    super(app);
-    this.plugin = plugin;
-
-    const fileStatus = this.plugin.getActiveFileStatus();
-    this.setPlaceholder(
-      !fileStatus
-        ? ""
-        : fileStatus === "new"
-          ? "This file is not in snapshot"
-          : fileStatus === "to_review"
-            ? "This file is not reviewed"
-            : "This file is reviewed",
-    );
-  }
-
-  getSuggestions = (query: string): Action[] => {
-    const activeFile = this.plugin.getActiveFile();
-    let actions: Action[] = [];
-
-    if (!activeFile) {
-      actions = ["open_random"];
-    } else {
-      const isReviewed =
-        this.plugin.getSnapshotFile(activeFile.path)?.status === "reviewed";
-
-      if (isReviewed) {
-        actions = ["open_random", "unreview"];
-      } else {
-        actions = ["review_and_next", "review", "open_random"];
-      }
-    }
-
-    return actions.filter((a) =>
-      ACTIONS[a].name.toLowerCase().includes(query.toLowerCase()),
-    );
-  };
-
-  renderSuggestion = (action: Action, el: HTMLElement) => {
-    el.createEl("div", { text: ACTIONS[action].name });
-  };
-
-  onChooseSuggestion = (action: Action, _evt: MouseEvent | KeyboardEvent) => {
-    if (action === "open_random") {
-      this.plugin.openRandomFile();
-    }
-
-    if (action === "review") {
-      this.plugin.completeReview();
-    }
-
-    if (action === "review_and_next") {
-      this.plugin.completeReview({ openNext: true });
-    }
-
-    if (action === "unreview") {
-      this.plugin.unreviewFile();
-    }
-  };
-}
-```
-
-### ConfirmSnapshotDeleteModal
-
-A simple confirmation dialog with Cancel and Delete buttons. Uses Obsidian's `Setting` component for layout, which is a common pattern in the plugin ecosystem.
-
-### FileStatusControllerModal
-
-A `SuggestModal` — Obsidian's typeahead/command palette component. It shows context-aware actions:
-
-- **No active file:** Only "Open random"
-- **Reviewed file:** "Open random" and "Unreview"
-- **Unreviewed file:** "Review and next", "Review", "Open random"
-
-The actions are filtered by the user's search query. `ACTIONS` is defined as `const` with `as const`, so `Action` is a string literal union type derived from the keys.
-
-> **Minor concern (issue #17):** `onChooseSuggestion` uses sequential `if` statements. Since only one action fires per call, `if/else if` or `switch` would communicate mutual exclusivity. Not a bug, just clarity.
-
-> **Minor concern (issue #18):** The nested ternary in the constructor (lines 588-596) sets the placeholder. A lookup map would be more readable.
-
----
-
-## Build System
-
-```bash
-cat build.ts
+sed -n '1,19p' build.ts
 ```
 
 ```output
@@ -951,145 +737,14 @@ if (watch) console.log("Watching for changes...");
 export {};
 ```
 
-The build uses Bun's native bundler:
+The build uses Bun's native bundler. Key choices:
 
-- **Entry:** `src/main.ts`
-- **Format:** CommonJS — required by Obsidian's plugin loader
-- **Externals:** `obsidian` and `electron` are provided by Obsidian at runtime
-- **Minification:** Enabled for production, disabled in watch mode
-- **Output:** `./main.js` (the file Obsidian loads)
+- **CJS format** — required by Obsidian's plugin loader.
+- **External `obsidian` and `electron`** — provided by the host app at runtime.
+- **Minified in production**, unminified in watch mode for debugging.
+- **No source maps** — see concerns section.
 
-> **Concern (issue #19):** No source maps are generated. In watch/dev mode, adding `sourcemap: "linked"` would help debugging.
-
-> **Note:** The `export {}` at the end makes this file a module (required for top-level `await`).
-
----
-
-## Version Management
-
-```bash
-cat version-bump.ts
-```
-
-```output
-import { readFileSync, writeFileSync } from "node:fs";
-
-const targetVersion = process.env.npm_package_version;
-if (!targetVersion) {
-  throw new Error("No version found in package.json");
-}
-
-// Update manifest.json
-const manifest = JSON.parse(readFileSync("manifest.json", "utf8"));
-const { minAppVersion } = manifest;
-manifest.version = targetVersion;
-writeFileSync("manifest.json", `${JSON.stringify(manifest, null, 2)}\n`);
-
-// Update versions.json
-const versions = JSON.parse(readFileSync("versions.json", "utf8"));
-versions[targetVersion] = minAppVersion;
-writeFileSync("versions.json", `${JSON.stringify(versions, null, 2)}\n`);
-
-console.log(`Updated to version ${targetVersion}`);
-```
-
-`version-bump.ts` keeps three files in sync:
-
-1. `package.json` — the source of truth (version updated manually by the developer)
-2. `manifest.json` — Obsidian reads this to display plugin version
-3. `versions.json` — Maps plugin versions to minimum Obsidian versions
-
-Run via `bun run version` (which sets `npm_package_version` from `package.json`).
-
----
-
-## CI/CD
-
-```bash
-cat .github/workflows/main.yml
-```
-
-```output
-name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
-jobs:
-  check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - run: bun install
-      - run: bun audit --audit-level=critical
-      - run: bun run check
-      - run: bun test
-```
-
-```bash
-cat .github/workflows/release.yml
-```
-
-```output
-name: Release
-
-on:
-  push:
-    tags:
-      - "*"
-
-permissions:
-  contents: write
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - run: |
-          bun install
-          bun run build
-
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            main.js
-            styles.css
-            manifest.json
-          fail_on_unmatched_files: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-```
-
-### CI (`main.yml`)
-
-Runs on push to main and pull requests. Executes `bun run check` which is `tsc --noEmit && biome check .` — type checking and linting.
-
-> **Concern (issue #13):** Tests are not run in CI. `bun test` is missing from the pipeline. The 16 unit tests provide no safety net in CI.
-
-### Release (`release.yml`)
-
-Triggered by any tag push. Builds the plugin and creates a GitHub release with `main.js` and `manifest.json` as assets.
-
-> **Concern (issue #4):** The tag pattern `"*"` matches **any** tag, not just version tags. A tag like `experiment` or `v2-beta` would trigger a release. Should use a semver pattern like `"[0-9]+.[0-9]+.[0-9]+"`.
-
----
-
-## Tests
+### Tests
 
 ```bash
 grep -c 'test(' src/main.test.ts
@@ -1130,37 +785,9 @@ describe("DEFAULT_SETTINGS", () => {
   test("no snapshot by default", () => {
 ```
 
-16 tests across 7 describe blocks. Coverage of pure logic is decent — the test suite covers:
+16 tests across 7 describe blocks covering the pure logic: `toFile`, filtering, lookup, statistics, rename, delete, and defaults. Tests **duplicate type definitions and helper functions** from `main.ts` rather than importing them — this is because the Obsidian module can't be imported in a test environment. See concerns section for trade-offs.
 
-- File creation (`toFile`)
-- Filtering (`getToReviewFiles`)
-- Lookup (`getSnapshotFile`)
-- Statistics computation (4 edge cases)
-- Rename and delete mutations
-- Default settings
-
-### Critical testing concern (issue #12)
-
-The test file **re-declares** `Brand`, `File`, `SnapshotFileStatus`, and `toFile` locally (lines 2-20) instead of importing from `src/main.ts`. This means:
-
-- Tests verify **copies** of the functions, not the production code
-- If the production implementation diverges, tests still pass
-- Test results give false confidence
-
-The fix: export pure functions from `main.ts` and import them in tests.
-
-### What's not tested
-
-- Plugin lifecycle (`onload`, `loadSettings`)
-- `focusFile` (including the silent-removal bug)
-- `deleteSnapshot` (including the double-resolve bug)
-- `completeReview` / `unreviewFile` auto-enroll path
-- StatusBar, modals, settings tab
-- Event handlers (`handleFileRename`, `handleFileDelete`)
-
----
-
-## Styles
+### Styles
 
 ```bash
 cat styles.css
@@ -1183,43 +810,33 @@ cat styles.css
 }
 ```
 
-Three CSS rules:
+Minimal CSS: status bar spacing, snapshot stats layout, and a `.hidden` utility class. Uses Obsidian CSS variables (`--size-2-2`) for consistency with the host theme.
 
-1. **`.status-bar-item.plugin-vault-review`** — Properly scoped with Obsidian's plugin class convention. Good.
-2. **`.in-snapshot`** — Used for the statistics display in settings. Reasonable.
-3. **`.hidden`** — Generic name, `display: none`. This is the collision risk flagged in issue #7. Should be namespaced.
+## Concerns
 
-Uses Obsidian's CSS custom properties (`--size-2-2`) which ensures visual consistency with the theme.
+### Code quality
 
----
+1. **Single-file monolith** (`src/main.ts`, 651 lines) — All six classes live in one file. This is manageable at current size but will become harder to navigate as features grow. Consider splitting into `plugin.ts`, `statusbar.ts`, `modals.ts`, `settings.ts`, and a shared `types.ts`.
 
-## Summary of Concerns
+2. **Duplicated types in tests** — `main.test.ts` re-declares `Brand`, `File`, `SnapshotFileStatus`, and `toFile` instead of importing from a shared module. If the source types change, the tests won't catch the drift. Extracting pure types and functions into a separate file (importable by both source and tests) would fix this.
 
-All open issues are tracked on GitHub. Here's the consolidated view:
+3. **Sequential `if` in `onChooseSuggestion`** (line 633–649) — Four independent `if` blocks execute for every action, but only one can match. Should be `if/else if` or a `switch` to express mutual exclusivity and avoid unnecessary checks. ([GitHub issue #17](https://github.com/philoserf/obsidian-vault-review/issues/17))
 
-| # | Severity | Issue |
-|---|----------|-------|
-| 6 | CRITICAL | `focusFile` silently removes files from snapshot when not found |
-| 12 | CRITICAL | Tests re-declare types instead of importing production code |
-| 8 | HIGH | Folder rename doesn't update child file paths |
-| 13 | HIGH | CI doesn't run tests |
-| 4 | HIGH | Release workflow triggers on any tag |
-| 5 | MEDIUM | `deleteSnapshot` promise double-resolves |
-| 7 | MEDIUM | Generic `.hidden` CSS class risks collision |
-| 14 | MEDIUM | `computeStats` duplicated between settings tab and tests |
-| 15 | MEDIUM | No `schemaVersion` for future migrations |
-| 16 | MEDIUM | `Promise.withResolvers` compatibility with older Obsidian |
-| 17 | LOW | Sequential `if` in `onChooseSuggestion` |
-| 18 | LOW | Nested ternary in modal constructor |
-| 19 | LOW | No source maps in dev builds |
+4. **Nested ternary in `FileStatusControllerModal` constructor** (line 596–604) — Three levels of ternary for the placeholder text. An `if/else` chain or a lookup object would be clearer. ([GitHub issue #18](https://github.com/philoserf/obsidian-vault-review/issues/18))
 
-### What the code does well
+5. **Linear file lookup** — `getSnapshotFile` uses `Array.find()` which is O(n) per call. For vaults with thousands of notes, consider a `Map<string, File>` index. Not urgent but worth noting for large vaults.
 
-- Clean TypeScript with strict mode enabled
-- Good use of Obsidian's API patterns (`registerEvent`, `checkCallback`, `SuggestModal`)
-- Zero runtime dependencies
-- Branded types for domain modeling
-- Arrow functions prevent `this`-binding bugs
-- File deletion marks as `deleted` rather than removing (preserves history)
-- Settings merge handles forward compatibility for new settings fields
-- Biome enforces consistent formatting
+6. **`getActiveFile` only accepts `.md`** — Filters by `extension !== "md"`, which means non-markdown files are silently ignored. This is intentional for the review use case but isn't documented.
+
+### Community standards and compatibility
+
+7. **`Promise.withResolvers` compatibility** (line 280) — This is an ES2024 feature. Older Obsidian versions running on earlier Electron/V8 may not support it. A manual polyfill (`new Promise((resolve, reject) => ...)`) would be safer. ([GitHub issue #16](https://github.com/philoserf/obsidian-vault-review/issues/16))
+
+8. **No source maps for development** — `build.ts` doesn't generate source maps in either mode. Stack traces from the minified `main.js` are unreadable. Adding `sourcemap: "external"` for dev builds would help debugging. ([GitHub issue #19](https://github.com/philoserf/obsidian-vault-review/issues/19))
+
+9. **No `schemaVersion` in settings** — If the settings shape changes in a future version, there's no migration path. Adding a version field now would make future migrations straightforward. ([GitHub issue #15](https://github.com/philoserf/obsidian-vault-review/issues/15))
+
+10. **Arrow functions as class methods** — The plugin uses arrow function properties (`onload = async () => {}`) throughout. While this avoids `this`-binding issues, it's unconventional for Obsidian plugins and means methods aren't on the prototype (slightly higher memory per instance, though irrelevant for a singleton plugin).
+
+11. **No `onunload`** — The plugin doesn't implement `onunload`. Obsidian's `Plugin` base class handles cleanup of registered events and commands, so this is safe — but an explicit empty `onunload` would signal intentionality.
+
