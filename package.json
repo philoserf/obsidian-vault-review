@@ -18,7 +18,7 @@
     "validate": "bun run scripts/validate-plugin.ts",
     "version": "bun run version-bump.ts",
     "test": "bun test",
-    "deploy": "cp main.js manifest.json ~/source/philoserf/notes/.obsidian/plugins/vault-review/"
+    "deploy": "cp main.js manifest.json styles.css ~/source/philoserf/notes/.obsidian/plugins/vault-review/"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.7",
