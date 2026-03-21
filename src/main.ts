@@ -63,7 +63,7 @@ export default class VaultReviewPlugin extends Plugin {
     await this.loadSettings();
 
     // Ribbon
-    this.addRibbonIcon("scan-eye", "Open vault review", () => {
+    this.addRibbonIcon("scan-eye", "Open review", () => {
       this.openFileStatusController();
     });
 

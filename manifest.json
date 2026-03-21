@@ -1,6 +1,6 @@
 {
-  "id": "vault-review",
-  "name": "Vault Review",
+  "id": "review",
+  "name": "Review",
   "version": "1.1.0",
   "minAppVersion": "1.0.0",
   "description": "Randomly review your vault and track progress",

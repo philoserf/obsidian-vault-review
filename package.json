@@ -1,5 +1,5 @@
 {
-  "name": "vault-review",
+  "name": "review",
   "version": "1.1.0",
   "description": "Randomly review your vault and track progress",
   "main": "main.js",
@@ -18,7 +18,7 @@
     "validate": "bun run scripts/validate-plugin.ts",
     "version": "bun run version-bump.ts",
     "test": "bun test",
-    "deploy": "cp main.js manifest.json styles.css ~/source/philoserf/notes/.obsidian/plugins/vault-review/"
+    "deploy": "cp main.js manifest.json styles.css ~/source/philoserf/notes/.obsidian/plugins/review/"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.7",
