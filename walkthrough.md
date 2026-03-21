@@ -794,7 +794,7 @@ cat styles.css
 ```
 
 ```output
-.status-bar-item.plugin-vault-review {
+.status-bar-item.plugin-review {
   padding: 0 var(--size-2-2);
   gap: var(--size-2-2);
 }
@@ -820,9 +820,9 @@ Minimal CSS: status bar spacing, snapshot stats layout, and a `.hidden` utility 
 
 2. **Duplicated types in tests** — `main.test.ts` re-declares `Brand`, `File`, `SnapshotFileStatus`, and `toFile` instead of importing from a shared module. If the source types change, the tests won't catch the drift. Extracting pure types and functions into a separate file (importable by both source and tests) would fix this.
 
-3. **Sequential `if` in `onChooseSuggestion`** (line 633–649) — Four independent `if` blocks execute for every action, but only one can match. Should be `if/else if` or a `switch` to express mutual exclusivity and avoid unnecessary checks. ([GitHub issue #17](https://github.com/philoserf/obsidian-vault-review/issues/17))
+3. **Sequential `if` in `onChooseSuggestion`** (line 633–649) — Four independent `if` blocks execute for every action, but only one can match. Should be `if/else if` or a `switch` to express mutual exclusivity and avoid unnecessary checks. ([GitHub issue #17](https://github.com/philoserf/obsidian-review/issues/17))
 
-4. **Nested ternary in `FileStatusControllerModal` constructor** (line 596–604) — Three levels of ternary for the placeholder text. An `if/else` chain or a lookup object would be clearer. ([GitHub issue #18](https://github.com/philoserf/obsidian-vault-review/issues/18))
+4. **Nested ternary in `FileStatusControllerModal` constructor** (line 596–604) — Three levels of ternary for the placeholder text. An `if/else` chain or a lookup object would be clearer. ([GitHub issue #18](https://github.com/philoserf/obsidian-review/issues/18))
 
 5. **Linear file lookup** — `getSnapshotFile` uses `Array.find()` which is O(n) per call. For vaults with thousands of notes, consider a `Map<string, File>` index. Not urgent but worth noting for large vaults.
 
@@ -830,11 +830,11 @@ Minimal CSS: status bar spacing, snapshot stats layout, and a `.hidden` utility 
 
 ### Community standards and compatibility
 
-7. **`Promise.withResolvers` compatibility** (line 280) — This is an ES2024 feature. Older Obsidian versions running on earlier Electron/V8 may not support it. A manual polyfill (`new Promise((resolve, reject) => ...)`) would be safer. ([GitHub issue #16](https://github.com/philoserf/obsidian-vault-review/issues/16))
+7. **`Promise.withResolvers` compatibility** (line 280) — This is an ES2024 feature. Older Obsidian versions running on earlier Electron/V8 may not support it. A manual polyfill (`new Promise((resolve, reject) => ...)`) would be safer. ([GitHub issue #16](https://github.com/philoserf/obsidian-review/issues/16))
 
-8. **No source maps for development** — `build.ts` doesn't generate source maps in either mode. Stack traces from the minified `main.js` are unreadable. Adding `sourcemap: "external"` for dev builds would help debugging. ([GitHub issue #19](https://github.com/philoserf/obsidian-vault-review/issues/19))
+8. **No source maps for development** — `build.ts` doesn't generate source maps in either mode. Stack traces from the minified `main.js` are unreadable. Adding `sourcemap: "external"` for dev builds would help debugging. ([GitHub issue #19](https://github.com/philoserf/obsidian-review/issues/19))
 
-9. **No `schemaVersion` in settings** — If the settings shape changes in a future version, there's no migration path. Adding a version field now would make future migrations straightforward. ([GitHub issue #15](https://github.com/philoserf/obsidian-vault-review/issues/15))
+9. **No `schemaVersion` in settings** — If the settings shape changes in a future version, there's no migration path. Adding a version field now would make future migrations straightforward. ([GitHub issue #15](https://github.com/philoserf/obsidian-review/issues/15))
 
 10. **Arrow functions as class methods** — The plugin uses arrow function properties (`onload = async () => {}`) throughout. While this avoids `this`-binding issues, it's unconventional for Obsidian plugins and means methods aren't on the prototype (slightly higher memory per instance, though irrelevant for a singleton plugin).
 
